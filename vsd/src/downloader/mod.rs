@@ -820,10 +820,13 @@ impl ThreadData {
             let response = match self.request.try_clone().unwrap().send() {
                 Ok(response) => response,
                 Err(error) => {
-                    self.pb
-                        .lock()
-                        .unwrap()
-                        .write(check_reqwest_error(&error)?)?;
+                    let message = check_reqwest_error(&error);
+                    if let Err(e) = message {
+                        self.pb.lock().unwrap().write(format!("{:?}", e))?;
+                        return Ok(vec![]);
+                    } else {
+                        self.pb.lock().unwrap().write(message.unwrap())?;
+                    }
                     continue;
                 }
             };
@@ -831,7 +834,11 @@ impl ThreadData {
             let status = response.status();
 
             if status.is_client_error() || status.is_server_error() {
-                bail!("failed to fetch segments");
+                self.pb
+                    .lock()
+                    .unwrap()
+                    .write("failed to fetch segments")?;
+                return Ok(vec![]);
             }
 
             let data = response.bytes()?.to_vec();
@@ -851,7 +858,8 @@ impl ThreadData {
             return Ok(data);
         }
 
-        bail!("reached maximum number of retries to download a segment");
+        self.pb.lock().unwrap().write("reached maximum number of retries to download a segment")?;
+        return Ok(vec![]);
     }
 
     fn notify(&self, stored: usize, estimate: usize) -> Result<()> {
@@ -894,6 +902,6 @@ fn check_reqwest_error(error: &reqwest::Error) -> Result<String> {
             _ => bail!("download failed {} (HTTP {})", url, status),
         }
     } else {
-        bail!("download failed {}", url)
+        bail!("download failed {}: {}", url, error)
     }
 }
