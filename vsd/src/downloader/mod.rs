@@ -837,7 +837,7 @@ impl ThreadData {
                 self.pb
                     .lock()
                     .unwrap()
-                    .write("failed to fetch segments")?;
+                    .write(format!("failed to fetch segments {}", status))?;
                 return Ok(vec![]);
             }
 
@@ -902,6 +902,6 @@ fn check_reqwest_error(error: &reqwest::Error) -> Result<String> {
             _ => bail!("download failed {} (HTTP {})", url, status),
         }
     } else {
-        bail!("download failed {}: {}", url, error)
+        bail!("download failed {}: {:#}", url, error)
     }
 }
