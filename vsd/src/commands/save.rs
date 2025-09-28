@@ -146,6 +146,10 @@ pub struct Save {
     /// Number of threads should be in range 1-16 (inclusive).
     #[arg(short, long, help_heading = "Download Options", default_value_t = 5, value_parser = clap::value_parser!(u8).range(1..=16))]
     pub threads: u8,
+
+    /// Timeout in seconds for each HTTP request during saving.
+    #[arg(long, help_heading = "Client Options", default_value_t = 30)]
+    pub timeout: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -267,7 +271,8 @@ impl Save {
         let mut client_builder = Client::builder()
             .danger_accept_invalid_certs(self.no_certificate_checks)
             .user_agent(self.user_agent)
-            .cookie_store(true);
+            .cookie_store(true)
+            .timeout(std::time::Duration::from_secs(self.timeout));
 
         if !self.header.is_empty() {
             let mut headers = HeaderMap::new();

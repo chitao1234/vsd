@@ -23,6 +23,7 @@ use std::{
     process::{Command, Stdio},
     sync::{Arc, Mutex},
     time::Instant,
+    fmt::Write,
 };
 use vsd_mp4::pssh::Pssh;
 
@@ -816,13 +817,13 @@ impl ThreadData {
     }
 
     fn download_segment(&self) -> Result<Vec<u8>> {
-        for _ in 0..self.total_retries {
+        for i in 0..self.total_retries {
             let response = match self.request.try_clone().unwrap().send() {
                 Ok(response) => response,
                 Err(error) => {
                     let message = check_reqwest_error(&error);
                     if let Err(e) = message {
-                        self.pb.lock().unwrap().write(format!("{:?}", e))?;
+                        self.pb.lock().unwrap().write(format!("Warning!!!: bailing out early due to {:?}", e))?;
                         return Ok(vec![]);
                     } else {
                         self.pb.lock().unwrap().write(message.unwrap())?;
@@ -837,11 +838,22 @@ impl ThreadData {
                 self.pb
                     .lock()
                     .unwrap()
-                    .write(format!("failed to fetch segments {}", status))?;
-                return Ok(vec![]);
+                    .write(format!("failed to fetch segment attempt {} status {}", i, status))?;
+                // return Ok(vec![]);
+                continue;
             }
 
-            let data = response.bytes()?.to_vec();
+            let data = match response.bytes() {
+                Ok(bytes) => bytes.to_vec(),
+                Err(err) => {
+                    // Treat body read/decoding errors as transient and retry
+                    self.pb
+                        .lock()
+                        .unwrap()
+                        .write(format!("    {} body read error: {} (retrying)", "Request".colorize("bold yellow"), err))?;
+                    continue;
+                }
+            };
             let elapsed_time = self.timer.elapsed().as_secs() as usize;
 
             if elapsed_time != 0 {
@@ -879,6 +891,15 @@ impl ThreadData {
     }
 }
 
+fn report(mut err: &(dyn std::error::Error + 'static)) -> String {
+    let mut s = format!("{}", err);
+    while let Some(src) = err.source() {
+        let _ = write!(s, "\n\nCaused by: {}", src);
+        err = src;
+    }
+    s
+}
+
 fn check_reqwest_error(error: &reqwest::Error) -> Result<String> {
     let request = "Request".colorize("bold yellow");
     let url = error.url().unwrap();
@@ -891,7 +912,7 @@ fn check_reqwest_error(error: &reqwest::Error) -> Result<String> {
 
     if let Some(status) = error.status() {
         match status {
-            StatusCode::REQUEST_TIMEOUT => Ok(format!("    {} {} (timeout)", request, url)),
+            StatusCode::REQUEST_TIMEOUT => Ok(format!("    {} {} (status timeout)", request, url)),
             StatusCode::TOO_MANY_REQUESTS => {
                 Ok(format!("    {} {} (too many requests)", request, url))
             }
@@ -899,9 +920,9 @@ fn check_reqwest_error(error: &reqwest::Error) -> Result<String> {
                 Ok(format!("    {} {} (service unavailable)", request, url))
             }
             StatusCode::GATEWAY_TIMEOUT => Ok(format!("    {} {} (gateway timeout)", request, url)),
-            _ => bail!("download failed {} (HTTP {})", url, status),
+            _ => Ok(format!("!!!!!!! unknown download failed {} (HTTP {})", url, status)),
         }
     } else {
-        bail!("download failed {}: {:#}", url, error)
+        bail!("!!!!!!!!!! no status download failed {}: {:#}", url, report(error))
     }
 }
